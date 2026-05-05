@@ -3,9 +3,11 @@
   "extends": ["config:base"],
   "schedule": ["before 6am on Monday"],
   "dependencyDashboard": true,
-  "dependencyDashboardTitle": "Renovate — Base Image Digest Bumps",
+  "dependencyDashboardTitle": "Renovate — Dependency Updates",
+  "dependencyDashboardApproval": false,
   "commitMessagePrefix": "chore(deps): ",
   "labels": ["renovate", "digest-bump"],
+  "ignoreDeps": ["docker/dockerfile"],
   "docker": {
     "enabled": true,
     "pinDigests": true

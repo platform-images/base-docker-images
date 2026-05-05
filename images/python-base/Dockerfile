@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:2780b5c3bab67f1f76c781860de469442999ed1a0d7992a5efdf2cffc0e3d769
 # Python 3.12 on Wolfi — standard variant (includes shell, pip, venv).
 # Use as the build stage in multi-stage Dockerfiles.
 FROM cgr.dev/chainguard/python:latest-dev@sha256:11cfc0818fe08d6ddd3d171368fca030bc271a605bd427db3ce0b414a4678368

@@ -13,8 +13,8 @@ required_labels := {
 label_keys[key] if {
     cmd := input[_]
     cmd.Cmd == "label"
-    # Labels are stored as flat key=value pairs in the parsed Dockerfile
     pair := cmd.Value[_]
+    is_string(pair)
     [key, _] := split(pair, "=")
 }
 
@@ -30,6 +30,7 @@ user_instructions[val] if {
     cmd := input[_]
     cmd.Cmd == "user"
     val := cmd.Value[0]
+    is_string(val)
 }
 
 deny[msg] if {
@@ -63,6 +64,7 @@ from_instructions[img] if {
     cmd := input[_]
     cmd.Cmd == "from"
     img := cmd.Value[0]
+    is_string(img)
 }
 
 deny[msg] if {
