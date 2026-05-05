@@ -26,26 +26,31 @@ deny[msg] if {
 
 # ── Non-root USER ──────────────────────────────────────────────────────────────
 
-user_instructions[val] if {
+# Helper used only for the presence check (no string ops on the value)
+has_user_instruction if {
     cmd := input[_]
     cmd.Cmd == "user"
-    val := cmd.Value[0]
-    is_string(val)
 }
 
 deny[msg] if {
-    not count(user_instructions) > 0
+    not has_user_instruction
     msg := "Dockerfile must set a non-root USER"
 }
 
 deny[msg] if {
-    val := user_instructions[_]
+    cmd := input[_]
+    cmd.Cmd == "user"
+    val := cmd.Value[0]
+    is_string(val)
     lower(val) == "root"
     msg := "Dockerfile must not run as root"
 }
 
 deny[msg] if {
-    val := user_instructions[_]
+    cmd := input[_]
+    cmd.Cmd == "user"
+    val := cmd.Value[0]
+    is_string(val)
     val == "0"
     msg := "Dockerfile must not run as uid 0 (root)"
 }
@@ -60,16 +65,11 @@ deny[msg] if {
 
 # ── Digest pinning ─────────────────────────────────────────────────────────────
 
-from_instructions[img] if {
+deny[msg] if {
     cmd := input[_]
     cmd.Cmd == "from"
     img := cmd.Value[0]
     is_string(img)
-}
-
-deny[msg] if {
-    img := from_instructions[_]
-    # Skip scratch and stage aliases (no colon or @)
     contains(img, ":")
     not contains(img, "@sha256:")
     not img == "scratch"
