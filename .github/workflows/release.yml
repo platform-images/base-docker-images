@@ -210,7 +210,7 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.image }}-distroless,mode=max
           provenance: false
 
-      # ── Syft SBOM + Cosign attestation ───────────────────────────────────────
+      # ── Syft SBOM + GitHub SBOM attestation ─────────────────────────────────
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.1
 
@@ -219,31 +219,33 @@ jobs:
 
       - name: Generate SBOM — standard
         run: |
-          syft ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }} \
-            -o spdx-json \
+          syft scan ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }} \
+            --output spdx-json \
             --file sbom-standard.spdx.json
 
       - name: Attest SBOM — standard
-        run: |
-          cosign attest --yes \
-            --predicate sbom-standard.spdx.json \
-            --type spdx \
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }}
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build-standard.outputs.digest }}
+          sbom-path: sbom-standard.spdx.json
+          push-to-registry: true
 
       - name: Generate SBOM — distroless
         if: steps.build-distroless.outcome == 'success'
         run: |
-          syft ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }} \
-            -o spdx-json \
+          syft scan ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }} \
+            --output spdx-json \
             --file sbom-distroless.spdx.json
 
       - name: Attest SBOM — distroless
         if: steps.build-distroless.outcome == 'success'
-        run: |
-          cosign attest --yes \
-            --predicate sbom-distroless.spdx.json \
-            --type spdx \
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }}
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build-distroless.outputs.digest }}
+          sbom-path: sbom-distroless.spdx.json
+          push-to-registry: true
 
       # ── Cosign keyless image signing (OIDC via GitHub Actions) ───────────────
       - name: Sign standard image
