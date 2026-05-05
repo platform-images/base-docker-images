@@ -1,11 +1,11 @@
-# base-docker-images
+# hardened-base
 
 Hardened, CVE-free base Docker images built on [Wolfi](https://wolfi.dev) by [Chainguard](https://chainguard.dev).  
 A platform engineering reference implementation: every image is digest-pinned, automatically patched, signed with Cosign, SBOM-attested, and SLSA Level 2+ provenance-stamped before it reaches a consumer.
 
-[![PR Checks](https://github.com/platform-images/base-docker-images/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/platform-images/base-docker-images/actions/workflows/pr-checks.yml)
-[![Release](https://github.com/platform-images/base-docker-images/actions/workflows/release.yml/badge.svg)](https://github.com/platform-images/base-docker-images/actions/workflows/release.yml)
-[![Nightly CVE Scan](https://github.com/platform-images/base-docker-images/actions/workflows/scheduled-scan.yml/badge.svg)](https://github.com/platform-images/base-docker-images/actions/workflows/scheduled-scan.yml)
+[![PR Checks](https://github.com/platform-images/hardened-base/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/platform-images/hardened-base/actions/workflows/pr-checks.yml)
+[![Release](https://github.com/platform-images/hardened-base/actions/workflows/release.yml/badge.svg)](https://github.com/platform-images/hardened-base/actions/workflows/release.yml)
+[![Nightly CVE Scan](https://github.com/platform-images/hardened-base/actions/workflows/scheduled-scan.yml/badge.svg)](https://github.com/platform-images/hardened-base/actions/workflows/scheduled-scan.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ---
@@ -141,7 +141,7 @@ CMD ["node", "dist/index.js"]
 
 ```bash
 cosign verify ghcr.io/platform-images/nodejs-base:1.0.0 \
-  --certificate-identity=https://github.com/platform-images/base-docker-images/.github/workflows/release.yml@refs/heads/main \
+  --certificate-identity=https://github.com/platform-images/hardened-base/.github/workflows/release.yml@refs/heads/main \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com
 ```
 
