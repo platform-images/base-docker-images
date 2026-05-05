@@ -224,7 +224,7 @@ jobs:
             --file sbom-standard.spdx.json
 
       - name: Attest SBOM — standard
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
           subject-digest: ${{ steps.build-standard.outputs.digest }}
@@ -240,7 +240,7 @@ jobs:
 
       - name: Attest SBOM — distroless
         if: steps.build-distroless.outcome == 'success'
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
           subject-digest: ${{ steps.build-distroless.outputs.digest }}
