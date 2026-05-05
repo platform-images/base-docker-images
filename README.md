@@ -162,12 +162,15 @@ cosign download attestation ghcr.io/platform-images/nodejs-base:1.0.0 \
 
 ### 4 — Apply admission control policies (Kubernetes)
 
+Reference policies are in [`examples/admission/`](examples/admission/). They are not
+applied automatically — copy and adapt them for your cluster.
+
 ```bash
 # Enforce approved registry only
-kubectl apply -f policies/admission/kyverno-registry-policy.yaml
+kubectl apply -f examples/admission/kyverno-registry-policy.yaml
 
 # Require valid Cosign signature before pod admission
-kubectl apply -f policies/admission/kyverno-cosign-policy.yaml
+kubectl apply -f examples/admission/kyverno-cosign-policy.yaml
 ```
 
 ---
