@@ -3,6 +3,20 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to build and publish"
+        required: true
+        type: choice
+        options:
+          - all
+          - wolfi-base
+          - nodejs-base
+          - python-base
+          - openjdk-base
+          - nginx-base
+          - go-base
 
 permissions:
   contents: write      # create git tags + GitHub Releases
@@ -15,17 +29,31 @@ env:
   REGISTRY: ghcr.io
   ORG: platform-images
 
-# ── Job 1: Detect which image directories changed in this push ────────────────
+# ── Job 1: Detect which image directories changed (or use manual input) ───────
 jobs:
   detect-changes:
     name: Detect Changed Images
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.filter.outputs.changes }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6.0.2
 
+      # Manual trigger — build the matrix directly from the input
+      - name: Set matrix from workflow_dispatch input
+        if: github.event_name == 'workflow_dispatch'
+        id: manual
+        run: |
+          IMAGE="${{ inputs.image }}"
+          if [[ "$IMAGE" == "all" ]]; then
+            echo 'matrix=["wolfi-base","nodejs-base","python-base","openjdk-base","nginx-base","go-base"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=[\"${IMAGE}\"]" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Push trigger — detect only what changed
       - uses: dorny/paths-filter@v4.0.1
+        if: github.event_name != 'workflow_dispatch'
         id: filter
         with:
           filters: |
@@ -41,6 +69,13 @@ jobs:
               - 'images/nginx-base/**'
             go-base:
               - 'images/go-base/**'
+
+      - name: Combine matrix output
+        id: set-matrix
+        run: |
+          MANUAL="${{ steps.manual.outputs.matrix }}"
+          FILTER="${{ steps.filter.outputs.changes }}"
+          echo "matrix=${MANUAL:-$FILTER}" >> "$GITHUB_OUTPUT"
 
 # ── Job 2: Build, scan, sign, attest, and publish each changed image ──────────
   publish:
