@@ -1,8 +1,5 @@
 package dockerfile
 
-import future.keywords.if
-import future.keywords.in
-
 # ── Required OCI labels ────────────────────────────────────────────────────────
 
 required_labels := {
@@ -10,7 +7,7 @@ required_labels := {
     "org.opencontainers.image.licenses",
 }
 
-label_keys[key] if {
+label_keys[key] {
     cmd := input[_]
     cmd.Cmd == "label"
     pair := cmd.Value[_]
@@ -18,41 +15,45 @@ label_keys[key] if {
     [key, _] := split(pair, "=")
 }
 
-deny[msg] if {
+deny[msg] {
     required := required_labels[_]
-    not required in label_keys
+    not label_keys[required]
     msg := sprintf("Missing required OCI label: %s", [required])
 }
 
 # ── Non-root USER ──────────────────────────────────────────────────────────────
 
-user_instructions[val] if {
+has_user_instruction {
+    cmd := input[_]
+    cmd.Cmd == "user"
+}
+
+deny[msg] {
+    not has_user_instruction
+    msg := "Dockerfile must set a non-root USER"
+}
+
+deny[msg] {
     cmd := input[_]
     cmd.Cmd == "user"
     val := cmd.Value[0]
     is_string(val)
-}
-
-deny[msg] if {
-    not count(user_instructions) > 0
-    msg := "Dockerfile must set a non-root USER"
-}
-
-deny[msg] if {
-    val := user_instructions[_]
     lower(val) == "root"
     msg := "Dockerfile must not run as root"
 }
 
-deny[msg] if {
-    val := user_instructions[_]
+deny[msg] {
+    cmd := input[_]
+    cmd.Cmd == "user"
+    val := cmd.Value[0]
+    is_string(val)
     val == "0"
     msg := "Dockerfile must not run as uid 0 (root)"
 }
 
 # ── Forbidden instructions ─────────────────────────────────────────────────────
 
-deny[msg] if {
+deny[msg] {
     cmd := input[_]
     cmd.Cmd == "add"
     msg := "Use COPY instead of ADD — ADD can unpack archives and fetch remote URLs unexpectedly"
@@ -60,16 +61,11 @@ deny[msg] if {
 
 # ── Digest pinning ─────────────────────────────────────────────────────────────
 
-from_instructions[img] if {
+deny[msg] {
     cmd := input[_]
     cmd.Cmd == "from"
     img := cmd.Value[0]
     is_string(img)
-}
-
-deny[msg] if {
-    img := from_instructions[_]
-    # Skip scratch and stage aliases (no colon or @)
     contains(img, ":")
     not contains(img, "@sha256:")
     not img == "scratch"
