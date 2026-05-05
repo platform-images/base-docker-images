@@ -242,7 +242,24 @@ Renovate opens weekly PRs bumping `@sha256:` pins. This workflow validates the P
 
 ### Trigger 5 — Runtime EOL Check (`eol-check.yml`)
 
-1st of every month. Queries the [endoflife.date](https://endoflife.date) API for Node.js, Python, OpenJDK, Nginx, and Go. Opens a warning issue at 90 days before EOL and a critical issue once the runtime has passed its EOL date.
+1st of every month. Queries the [endoflife.date](https://endoflife.date) API for every tracked runtime and opens GitHub Issues when a version is approaching or past its end-of-life date.
+
+| State | Threshold | Issue severity |
+|---|---|---|
+| Approaching EOL | ≤ 90 days remaining | Warning |
+| Past EOL | EOL date exceeded | Critical |
+
+**Why this is separate from the nightly CVE scan:** Trivy catches vulnerabilities in the *current* packages — it's reactive. The EOL check catches the *upcoming cliff edge* where the entire runtime version stops receiving upstream security patches. Once a runtime is EOL, Chainguard stops shipping fixes for it, the Trivy gate starts failing, and there is no fix available short of a major version upgrade. The 90-day warning gives you time to plan that upgrade before the pipeline forces your hand.
+
+Tracked runtimes (update these in `eol-check.yml` after any major version upgrade):
+
+| Image | Runtime | Version |
+|---|---|---|
+| `nodejs-base` | Node.js | 20 |
+| `python-base` | Python | 3.12 |
+| `openjdk-base` | OpenJDK | 21 |
+| `nginx-base` | Nginx | 1.26 |
+| `go-base` | Go | 1.22 |
 
 ---
 
