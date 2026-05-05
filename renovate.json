@@ -33,6 +33,22 @@
       "matchPackagePatterns": [".*"],
       "excludePackagePatterns": ["^cgr\\.dev/chainguard/"],
       "automerge": false
+    },
+    {
+      "description": "GitHub Actions version bumps — auto-merge patch/minor, manual for major",
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "platformAutomerge": false,
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "commitMessageTopic": "GitHub Action {{depName}}"
+    },
+    {
+      "description": "GitHub Actions major version bumps — require manual review",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
     }
   ]
 }
