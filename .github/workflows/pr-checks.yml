@@ -76,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_changes: ${{ steps.set-matrix.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -112,16 +113,24 @@ jobs:
 
       - name: Combine matrix output
         id: set-matrix
+        env:
+          MANUAL: ${{ steps.manual.outputs.matrix }}
+          FILTER: ${{ steps.filter.outputs.changes }}
         run: |
-          MANUAL="${{ steps.manual.outputs.matrix }}"
-          FILTER="${{ steps.filter.outputs.changes }}"
-          echo "matrix=${MANUAL:-$FILTER}" >> "$GITHUB_OUTPUT"
+          MATRIX="${MANUAL:-$FILTER}"
+          if [[ -z "$MATRIX" || "$MATRIX" == "[]" ]]; then
+            echo 'matrix=["__skip__"]' >> "$GITHUB_OUTPUT"
+            echo 'has_changes=false' >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+            echo 'has_changes=true' >> "$GITHUB_OUTPUT"
+          fi
 
 # ── Job 4: Build, scan, lint, and test every changed image ────────────────────
   build-and-scan:
     name: Build & Scan / ${{ matrix.image }}
     needs: [secrets-scan, policy-check, detect-changes]
-    if: needs.detect-changes.outputs.matrix != '[]'
+    if: needs.detect-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
