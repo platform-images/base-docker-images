@@ -12,7 +12,7 @@ A platform engineering reference implementation: every image is digest-pinned, a
 
 ## Architecture
 
-The diagram below shows the complete supply chain — from a developer pushing a Dockerfile change or Renovate opening a digest-bump PR, through every automated gate, to a verified image running in Kubernetes.
+The diagram below shows the complete supply chain — from a developer pushing a Dockerfile change or Renovate opening a digest-bump PR, through every automated gate, to a signed and attested image ready for production.
 
 ```mermaid
 flowchart TD
@@ -53,7 +53,7 @@ flowchart TD
         R3["🛡 Trivy\nPre-push Gate"]
         R4["📦 Push to GHCR\nghcr.io/platform-images/*"]
         R5["✍️ Cosign Sign\nKeyless OIDC"]
-        R6["📄 Syft SBOM\nAttestation"]
+        R6["📄 SBOM\nAttestation"]
         R7["🔒 SLSA Level 2+\nProvenance"]
         R8["🏷 Git Tag\n+ GitHub Release\nvX.Y.Z"]
         R1 --> R2 --> R3 --> R4
@@ -71,12 +71,10 @@ flowchart TD
 
     subgraph CONSUMER["  Consumer Side  "]
         direction LR
-        C1["FROM ghcr.io/platform-images/*"]
-        C2["cosign verify\nsignature"]
-        C3["Kubernetes\nAdmission Control"]
-        C4["Kyverno / OPA\nRegistry + Signature Policy"]
-        C5["🚀 Pod Running\nnon-root · read-only rootfs"]
-        C1 --> C2 --> C3 --> C4 --> C5
+        C1["FROM ghcr.io/platform-images/*\npinned to digest"]
+        C2["cosign verify\nsignature + provenance"]
+        C3["🚀 Production Workload\nnon-root · minimal attack surface"]
+        C1 --> C2 --> C3
     end
 
     IMG --> C1
