@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Node.js LTS on Wolfi — distroless variant (no shell, no package manager).
+# Use as the final runtime stage in multi-stage Dockerfiles.
+FROM cgr.dev/chainguard/node:latest@sha256:437a4e995dfbda352b439a9b91fdc15b8ee785b57f7c01be805dc07cc62b7ad9
+
+ARG BUILD_DATE
+ARG GIT_REVISION
+
+LABEL org.opencontainers.image.source="https://github.com/platform-images/base-docker-images"
+LABEL org.opencontainers.image.version="1.0.0-distroless"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+USER nonroot

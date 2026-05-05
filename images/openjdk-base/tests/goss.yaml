@@ -1,0 +1,24 @@
+command:
+  java-version:
+    exec: "java -version"
+    exit-status: 0
+    stderr:
+      - "/openjdk version/"
+  mvn-version:
+    exec: "mvn --version"
+    exit-status: 0
+    stdout:
+      - "/Apache Maven/"
+
+file:
+  /usr/bin/java:
+    exists: true
+  /etc/ssl/certs/ca-certificates.crt:
+    exists: true
+    mode: "0644"
+
+user:
+  nonroot:
+    exists: true
+    uid: 65532
+    gid: 65532

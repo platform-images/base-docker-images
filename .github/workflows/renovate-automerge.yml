@@ -1,0 +1,63 @@
+name: Renovate Auto-merge
+
+# Runs when Renovate opens or updates a PR. Enables auto-merge so GitHub will
+# merge the PR automatically once all required status checks (pr-checks.yml) pass.
+# The actual merge decision is deferred to branch protection — this workflow only
+# flips the auto-merge flag.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  enable-auto-merge:
+    name: Enable Auto-merge
+    runs-on: ubuntu-latest
+    # Only run for Renovate-authored PRs
+    if: |
+      github.actor == 'renovate[bot]' ||
+      github.actor == 'renovate-release[bot]'
+    steps:
+      - name: Validate PR is a digest-only bump
+        id: validate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            // Only allow auto-merge when the diff touches Dockerfiles and renovate.json
+            const allowed = /^(images\/.*\/Dockerfile.*|renovate\.json)$/;
+            const unexpected = files
+              .map(f => f.filename)
+              .filter(f => !allowed.test(f));
+
+            if (unexpected.length > 0) {
+              core.warning(`Unexpected files changed by Renovate: ${unexpected.join(', ')} — skipping auto-merge`);
+              core.setOutput('safe', 'false');
+            } else {
+              core.setOutput('safe', 'true');
+            }
+
+      - name: Enable auto-merge (squash)
+        if: steps.validate.outputs.safe == 'true'
+        run: |
+          gh pr merge --auto --squash "$PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+
+      - name: Summarize
+        run: |
+          if [[ "${{ steps.validate.outputs.safe }}" == "true" ]]; then
+            echo "Auto-merge enabled. PR will merge once required status checks pass."
+          else
+            echo "Auto-merge not enabled — unexpected file changes in this Renovate PR require manual review."
+          fi

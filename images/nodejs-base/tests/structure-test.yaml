@@ -1,0 +1,41 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "nonroot"
+  envVars:
+    - key: "NODE_ENV"
+      value: "production"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "node binary executes"
+    command: "node"
+    args: ["--version"]
+    expectedOutput: ["v[0-9]+\\."]
+  - name: "npm binary executes"
+    command: "npm"
+    args: ["--version"]
+    expectedOutput: ["[0-9]+\\.[0-9]+\\."]
+  - name: "npx binary executes"
+    command: "npx"
+    args: ["--version"]
+    expectedOutput: ["[0-9]+\\.[0-9]+\\."]
+  - name: "runs as non-root uid 65532"
+    command: "id"
+    args: ["-u"]
+    expectedOutput: ["65532"]
+
+fileExistenceTests:
+  - name: "node binary present"
+    path: "/usr/bin/node"
+    shouldExist: true
+  - name: "npm binary present"
+    path: "/usr/bin/npm"
+    shouldExist: true
+  - name: "ca-certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true

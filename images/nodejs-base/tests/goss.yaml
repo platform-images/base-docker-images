@@ -1,0 +1,28 @@
+command:
+  node-version:
+    exec: "node --version"
+    exit-status: 0
+    stdout:
+      - "/v[0-9]+\\./"
+  npm-version:
+    exec: "npm --version"
+    exit-status: 0
+    stdout:
+      - "/[0-9]+\\.[0-9]+\\./"
+
+file:
+  /usr/bin/node:
+    exists: true
+  /usr/bin/npm:
+    exists: true
+  /etc/ssl/certs/ca-certificates.crt:
+    exists: true
+    mode: "0644"
+
+user:
+  nonroot:
+    exists: true
+    uid: 65532
+    gid: 65532
+
+# NOTE: Distroless variant (Dockerfile.distroless) has no shell — use structure-test.yaml for that variant.

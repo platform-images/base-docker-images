@@ -1,0 +1,22 @@
+command:
+  go-version:
+    exec: "go version"
+    exit-status: 0
+    stdout:
+      - "/go version go[0-9]+\\./"
+
+file:
+  /usr/local/go/bin/go:
+    exists: true
+  /etc/ssl/certs/ca-certificates.crt:
+    exists: true
+    mode: "0644"
+
+user:
+  nonroot:
+    exists: true
+    uid: 65532
+    gid: 65532
+
+# NOTE: The distroless variant (Dockerfile.distroless) has no shell.
+# Goss cannot run against it — use structure-test-distroless.yaml for that variant.

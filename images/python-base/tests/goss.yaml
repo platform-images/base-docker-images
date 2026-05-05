@@ -1,0 +1,24 @@
+command:
+  python-version:
+    exec: "python3 --version"
+    exit-status: 0
+    stdout:
+      - "/Python 3\\./"
+  pip-version:
+    exec: "pip3 --version"
+    exit-status: 0
+    stdout:
+      - "/pip [0-9]+\\./"
+
+file:
+  /usr/bin/python3:
+    exists: true
+  /etc/ssl/certs/ca-certificates.crt:
+    exists: true
+    mode: "0644"
+
+user:
+  nonroot:
+    exists: true
+    uid: 65532
+    gid: 65532

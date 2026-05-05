@@ -1,0 +1,13 @@
+# Local scan/build artifacts — never commit these
+trivy-*.json
+dockle-report-*.json
+sbom-*.spdx.json
+eol-results.json
+*.tar.gz
+conftest
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

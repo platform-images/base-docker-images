@@ -1,0 +1,26 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "nonroot"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "runs as non-root uid 65532"
+    command: "id"
+    args: ["-u"]
+    expectedOutput: ["65532"]
+
+fileExistenceTests:
+  - name: "ca-certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true
+  - name: "tzdata UTC zone present"
+    path: "/usr/share/zoneinfo/UTC"
+    shouldExist: true
+  - name: "no root-owned suid binaries"
+    path: "/bin/su"
+    shouldExist: false

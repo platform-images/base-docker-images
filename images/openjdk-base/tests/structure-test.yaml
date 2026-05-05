@@ -1,0 +1,31 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "nonroot"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "java binary executes"
+    command: "java"
+    args: ["-version"]
+    expectedError: ["openjdk version"]
+  - name: "mvn binary executes"
+    command: "mvn"
+    args: ["--version"]
+    expectedOutput: ["Apache Maven"]
+  - name: "runs as non-root uid 65532"
+    command: "id"
+    args: ["-u"]
+    expectedOutput: ["65532"]
+
+fileExistenceTests:
+  - name: "java binary present"
+    path: "/usr/bin/java"
+    shouldExist: true
+  - name: "ca-certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true

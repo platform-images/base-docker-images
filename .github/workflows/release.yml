@@ -1,0 +1,278 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write      # create git tags + GitHub Releases
+  packages: write      # push to GHCR
+  id-token: write      # OIDC token for Cosign keyless signing + SLSA
+  security-events: write
+  attestations: write  # actions/attest-build-provenance
+
+env:
+  REGISTRY: ghcr.io
+  ORG: platform-images
+
+# ── Job 1: Detect which image directories changed in this push ────────────────
+jobs:
+  detect-changes:
+    name: Detect Changed Images
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            wolfi-base:
+              - 'images/wolfi-base/**'
+            nodejs-base:
+              - 'images/nodejs-base/**'
+            python-base:
+              - 'images/python-base/**'
+            openjdk-base:
+              - 'images/openjdk-base/**'
+            nginx-base:
+              - 'images/nginx-base/**'
+            go-base:
+              - 'images/go-base/**'
+
+# ── Job 2: Build, scan, sign, attest, and publish each changed image ──────────
+  publish:
+    name: Publish / ${{ matrix.image }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.detect-changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Calculate next semver from git tags ─────────────────────────────────
+      - name: Calculate next semver
+        id: version
+        run: |
+          IMAGE=${{ matrix.image }}
+          git fetch --tags --quiet
+          LATEST=$(git tag -l "release/${IMAGE}/v*" | sort -V | tail -1)
+          if [[ -z "$LATEST" ]]; then
+            NEW_VER="1.0.0"
+          else
+            VER="${LATEST#release/${IMAGE}/v}"
+            MAJOR="${VER%%.*}"; REST="${VER#*.}"; MINOR="${REST%%.*}"; PATCH="${REST#*.}"
+            NEW_VER="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "semver=${NEW_VER}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # ── Build amd64 only first — scan before committing to a multi-arch push ─
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build standard (amd64, local) for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:scan
+          build-args: |
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
+            GIT_REVISION=${{ github.sha }}
+
+      - name: Trivy CVE scan — pre-push gate
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ matrix.image }}:scan
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Dockle CIS compliance report (saved as artifact)
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            goodwithtech/dockle:latest \
+            --exit-code 0 \
+            --format json \
+            ${{ matrix.image }}:scan \
+          > dockle-report-${{ matrix.image }}.json
+
+      - name: Upload Dockle report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-${{ matrix.image }}-${{ steps.version.outputs.semver }}
+          path: dockle-report-${{ matrix.image }}.json
+          retention-days: 90
+
+      # ── Log in and push multi-arch standard image ────────────────────────────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build + push standard (multi-arch)
+        id: build-standard
+        uses: docker/build-push-action@v5
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:${{ steps.version.outputs.semver }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest
+          build-args: |
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
+            GIT_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          provenance: false   # we generate SLSA provenance ourselves below
+
+      # ── Distroless variant ───────────────────────────────────────────────────
+      - name: Build + push distroless (multi-arch)
+        id: build-distroless
+        if: hashFiles(format('images/{0}/Dockerfile.distroless', matrix.image)) != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile.distroless
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:${{ steps.version.outputs.semver }}-distroless
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest-distroless
+          build-args: |
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
+            GIT_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}-distroless
+          cache-to: type=gha,scope=${{ matrix.image }}-distroless,mode=max
+          provenance: false
+
+      # ── Syft SBOM + Cosign attestation ───────────────────────────────────────
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM — standard
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }} \
+            -o spdx-json \
+            --file sbom-standard.spdx.json
+
+      - name: Attest SBOM — standard
+        run: |
+          cosign attest --yes \
+            --predicate sbom-standard.spdx.json \
+            --type spdx \
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }}
+
+      - name: Generate SBOM — distroless
+        if: steps.build-distroless.outcome == 'success'
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }} \
+            -o spdx-json \
+            --file sbom-distroless.spdx.json
+
+      - name: Attest SBOM — distroless
+        if: steps.build-distroless.outcome == 'success'
+        run: |
+          cosign attest --yes \
+            --predicate sbom-distroless.spdx.json \
+            --type spdx \
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }}
+
+      # ── Cosign keyless image signing (OIDC via GitHub Actions) ───────────────
+      - name: Sign standard image
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-standard.outputs.digest }}
+
+      - name: Sign distroless image
+        if: steps.build-distroless.outcome == 'success'
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}@${{ steps.build-distroless.outputs.digest }}
+
+      # ── SLSA Level 2+ build provenance attestation ───────────────────────────
+      - name: Attest build provenance — standard
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build-standard.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest build provenance — distroless
+        if: steps.build-distroless.outcome == 'success'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build-distroless.outputs.digest }}
+          push-to-registry: true
+
+      # ── Git tag + GitHub Release ──────────────────────────────────────────────
+      - name: Create release tag
+        run: |
+          TAG="release/${{ matrix.image }}/v${{ steps.version.outputs.semver }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release ${{ matrix.image }} v${{ steps.version.outputs.semver }}"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release/${{ matrix.image }}/v${{ steps.version.outputs.semver }}
+          name: "${{ matrix.image }} v${{ steps.version.outputs.semver }}"
+          body: |
+            ## ${{ matrix.image }} v${{ steps.version.outputs.semver }}
+
+            **Published:** `${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:${{ steps.version.outputs.semver }}`
+            **Digest (standard):** `${{ steps.build-standard.outputs.digest }}`
+            **Git SHA:** `${{ github.sha }}`
+
+            ### Verify the signature
+            ```bash
+            cosign verify ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:${{ steps.version.outputs.semver }} \
+              --certificate-identity=https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/heads/main \
+              --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+            ```
+
+            ### Pull
+            ```dockerfile
+            FROM ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:${{ steps.version.outputs.semver }}@${{ steps.build-standard.outputs.digest }}
+            ```
+          files: |
+            dockle-report-${{ matrix.image }}.json
+            sbom-standard.spdx.json
+
+      # ── Slack/Teams notification ──────────────────────────────────────────────
+      - name: Notify Slack
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -sSf -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": ":white_check_mark: *${{ matrix.image }}* v${{ steps.version.outputs.semver }} published to GHCR\nDigest: `${{ steps.build-standard.outputs.digest }}`"
+            }'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

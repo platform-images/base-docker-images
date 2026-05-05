@@ -1,0 +1,84 @@
+name: base-docker-images
+
+# Local validation — spin up any image to manually inspect it before opening a PR.
+# Usage: docker compose up wolfi-base
+#        docker compose run --rm nodejs-base node --version
+
+services:
+  wolfi-base:
+    build:
+      context: images/wolfi-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/wolfi-base:local
+    command: ["id"]
+
+  nodejs-base:
+    build:
+      context: images/nodejs-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/nodejs-base:local
+    command: ["node", "--version"]
+
+  nodejs-base-distroless:
+    build:
+      context: images/nodejs-base
+      dockerfile: Dockerfile.distroless
+    image: ghcr.io/platform-images/nodejs-base:local-distroless
+    command: ["node", "--version"]
+
+  python-base:
+    build:
+      context: images/python-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/python-base:local
+    command: ["python3", "--version"]
+
+  python-base-distroless:
+    build:
+      context: images/python-base
+      dockerfile: Dockerfile.distroless
+    image: ghcr.io/platform-images/python-base:local-distroless
+    command: ["python3", "--version"]
+
+  openjdk-base:
+    build:
+      context: images/openjdk-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/openjdk-base:local
+    command: ["java", "-version"]
+
+  openjdk-base-distroless:
+    build:
+      context: images/openjdk-base
+      dockerfile: Dockerfile.distroless
+    image: ghcr.io/platform-images/openjdk-base:local-distroless
+    command: ["java", "-version"]
+
+  nginx-base:
+    build:
+      context: images/nginx-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/nginx-base:local
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+
+  go-base:
+    build:
+      context: images/go-base
+      dockerfile: Dockerfile
+    image: ghcr.io/platform-images/go-base:local
+    command: ["go", "version"]
+
+  go-base-distroless:
+    build:
+      context: images/go-base
+      dockerfile: Dockerfile.distroless
+    image: ghcr.io/platform-images/go-base:local-distroless
+    # No shell or entrypoint — mount a compiled binary to test
+    # Example: docker compose run -v ./mybinary:/app/server go-base-distroless /app/server
+    command: ["/bin/true"]

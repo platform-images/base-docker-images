@@ -1,0 +1,181 @@
+name: Runtime EOL Check
+
+# Monthly check against endoflife.date API. Opens GitHub Issues when a tracked
+# runtime is within 90 days of EOL or has already passed it.
+# Update RUNTIMES below whenever a major version upgrade is merged.
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'  # 08:00 UTC on the 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  eol-check:
+    name: Check Runtime EOL Dates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Query endoflife.date and evaluate each runtime ────────────────────────
+      - name: Run EOL checks
+        id: check
+        run: |
+          set -euo pipefail
+
+          # Format: "endoflife-api-slug:image-name:tracked-version"
+          # Update tracked-version when the corresponding Dockerfile is upgraded.
+          RUNTIMES=(
+            "nodejs:nodejs-base:20"
+            "python:python-base:3.12"
+            "openjdk:openjdk-base:21"
+            "nginx:nginx-base:1.26"
+            "go:go-base:1.22"
+          )
+
+          WARN_DAYS=90
+          TODAY_EPOCH=$(date -u +%s)
+          RESULTS_FILE="eol-results.json"
+          echo "[]" > "$RESULTS_FILE"
+
+          for entry in "${RUNTIMES[@]}"; do
+            IFS=: read -r api image version <<< "$entry"
+            echo "Checking ${image} (${api} ${version})..."
+
+            DATA=$(curl -sSf "https://endoflife.date/api/${api}.json") || {
+              echo "WARNING: Could not reach endoflife.date for ${api} — skipping"
+              continue
+            }
+
+            # Find the first release whose cycle starts with our tracked version
+            EOL=$(echo "$DATA" | jq -r --arg v "$version" \
+              '.[] | select(.cycle | startswith($v)) | .eol' | head -1)
+
+            if [[ -z "$EOL" || "$EOL" == "null" || "$EOL" == "false" ]]; then
+              echo "  ${image}: No EOL date set — OK"
+              continue
+            fi
+
+            EOL_EPOCH=$(date -u -d "$EOL" +%s 2>/dev/null || \
+                        python3 -c "import datetime; print(int(datetime.datetime.strptime('$EOL','%Y-%m-%d').timestamp()))")
+            DIFF_SECONDS=$(( EOL_EPOCH - TODAY_EPOCH ))
+            DIFF_DAYS=$(( DIFF_SECONDS / 86400 ))
+
+            if [[ $DIFF_SECONDS -lt 0 ]]; then
+              STATUS="past_eol"
+              DAYS_LABEL="${DIFF_DAYS#-} days past EOL"
+              echo "  PAST EOL: ${image} (${version}) was EOL on ${EOL}"
+            elif [[ $DIFF_DAYS -le $WARN_DAYS ]]; then
+              STATUS="near_eol"
+              DAYS_LABEL="${DIFF_DAYS} days until EOL (${EOL})"
+              echo "  NEAR EOL: ${image} (${version}) — ${DIFF_DAYS} days left"
+            else
+              echo "  OK: ${image} (${version}) — EOL in ${DIFF_DAYS} days (${EOL})"
+              continue
+            fi
+
+            # Append to results JSON
+            jq --arg img "$image" \
+               --arg api "$api" \
+               --arg ver "$version" \
+               --arg eol "$EOL" \
+               --arg status "$STATUS" \
+               --argjson days "$DIFF_DAYS" \
+               --arg label "$DAYS_LABEL" \
+               '. += [{image:$img, api:$api, version:$ver, eol:$eol, status:$status, days:$days, label:$label}]' \
+               "$RESULTS_FILE" > tmp.json && mv tmp.json "$RESULTS_FILE"
+          done
+
+          echo "Results:"
+          cat "$RESULTS_FILE"
+
+          # Surface count for the next step
+          COUNT=$(jq 'length' "$RESULTS_FILE")
+          echo "alert_count=${COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload EOL results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eol-check-${{ github.run_number }}
+          path: eol-results.json
+          retention-days: 90
+
+      # ── Open/update GitHub Issues for each at-risk runtime ────────────────────
+      - name: Create or update EOL issues
+        if: steps.check.outputs.alert_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('eol-results.json', 'utf8'));
+
+            for (const rt of results) {
+              const isPast  = rt.status === 'past_eol';
+              const severity = isPast ? 'CRITICAL' : 'WARNING';
+              const title    = `[EOL ${severity}] ${rt.image} — ${rt.api} ${rt.version} ${rt.label}`;
+
+              const body = [
+                `## Runtime EOL ${isPast ? 'Passed' : 'Approaching'} — \`${rt.image}\``,
+                '',
+                `| Field | Value |`,
+                `|-------|-------|`,
+                `| Image | \`ghcr.io/platform-images/${rt.image}:latest\` |`,
+                `| Runtime | ${rt.api} ${rt.version} |`,
+                `| EOL Date | **${rt.eol}** |`,
+                `| Status | ${rt.label} |`,
+                `| Check Date | ${new Date().toISOString().slice(0,10)} |`,
+                '',
+                isPast
+                  ? `### :rotating_light: Action Required\nThis runtime reached end-of-life on **${rt.eol}**. It no longer receives security patches upstream. The image must be upgraded immediately.`
+                  : `### :warning: Action Needed Within ${rt.days} Days\nThe upstream ${rt.api} ${rt.version} runtime will reach end-of-life on **${rt.eol}**. Plan a migration before that date.`,
+                '',
+                '### Upgrade Steps',
+                '1. Identify the next supported LTS version at https://endoflife.date/' + rt.api,
+                `2. Update the \`FROM\` line in \`images/${rt.image}/Dockerfile\` to the new Chainguard image tag`,
+                `3. If a distroless variant exists, update \`images/${rt.image}/Dockerfile.distroless\` too`,
+                '4. Run `make all IMAGE=' + rt.image + '` locally to validate before opening a PR',
+                '5. Update the `tracked-version` entry for this runtime in `.github/workflows/eol-check.yml`',
+                '',
+                `> Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              ].join('\n');
+
+              // Look for an existing open EOL issue for this image
+              const existing = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['eol', rt.image],
+                state: 'open',
+              });
+
+              if (existing.data.length > 0) {
+                const num = existing.data[0].number;
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: num,
+                  title,
+                  body,
+                });
+                console.log(`Updated EOL issue #${num} for ${rt.image}`);
+              } else {
+                const labels = ['eol', rt.image, 'automated'];
+                if (isPast) labels.push('critical');
+                const { data: issue } = await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title,
+                  body,
+                  labels,
+                });
+                console.log(`Opened EOL issue #${issue.number} for ${rt.image}`);
+              }
+            }
+
+      - name: No EOL alerts
+        if: steps.check.outputs.alert_count == '0'
+        run: |
+          echo "All tracked runtimes are healthy — no EOL alerts raised."

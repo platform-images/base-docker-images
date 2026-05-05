@@ -1,0 +1,37 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "nonroot"
+  envVars:
+    - key: "CGO_ENABLED"
+      value: "0"
+    - key: "GOOS"
+      value: "linux"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "go binary executes"
+    command: "go"
+    args: ["version"]
+    expectedOutput: ["go version go[0-9]+\\."]
+  - name: "runs as non-root uid 65532"
+    command: "id"
+    args: ["-u"]
+    expectedOutput: ["65532"]
+
+fileExistenceTests:
+  - name: "go binary present"
+    path: "/usr/local/go/bin/go"
+    shouldExist: true
+  - name: "ca-certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true
+
+---
+# Distroless variant — validate separately by running:
+#   container-structure-test test --image ghcr.io/platform-images/go-base:VERSION-distroless \
+#     --config images/go-base/tests/structure-test-distroless.yaml

@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# OpenJDK on Wolfi — distroless variant (JRE only, no shell, no Maven).
+# Use as the final runtime stage in multi-stage Dockerfiles.
+FROM cgr.dev/chainguard/jre:latest@sha256:51a105d212ec9618010bcc46ec234e40d5117e3a25757ed90f535327ab69dacd
+
+ARG BUILD_DATE
+ARG GIT_REVISION
+
+LABEL org.opencontainers.image.source="https://github.com/platform-images/base-docker-images"
+LABEL org.opencontainers.image.version="1.0.0-distroless"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+ENV JAVA_TOOL_OPTIONS="-Djava.security.egd=file:/dev/./urandom -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+
+WORKDIR /app
+
+USER nonroot

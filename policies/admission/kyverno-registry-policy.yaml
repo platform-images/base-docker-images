@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      Workloads must only pull images from the approved internal registry
+      (ghcr.io/platform-images). Pulling from raw upstream registries bypasses
+      CVE scanning, signing, and SBOM attestation enforced by this repository.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-init-containers
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Init containers must use images from ghcr.io/platform-images"
+        foreach:
+          - list: "request.object.spec.initContainers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "ghcr.io/platform-images/*"
+
+    - name: validate-containers
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Containers must use images from ghcr.io/platform-images"
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "ghcr.io/platform-images/*"

@@ -1,0 +1,39 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "nonroot"
+  envVars:
+    - key: "PYTHONDONTWRITEBYTECODE"
+      value: "1"
+    - key: "PYTHONUNBUFFERED"
+      value: "1"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "python3 binary executes"
+    command: "python3"
+    args: ["--version"]
+    expectedOutput: ["Python 3\\."]
+  - name: "pip3 binary executes"
+    command: "pip3"
+    args: ["--version"]
+    expectedOutput: ["pip [0-9]+\\."]
+  - name: "runs as non-root uid 65532"
+    command: "id"
+    args: ["-u"]
+    expectedOutput: ["65532"]
+
+fileExistenceTests:
+  - name: "python3 binary present"
+    path: "/usr/bin/python3"
+    shouldExist: true
+  - name: "ca-certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true
+  - name: "no .pyc files at root"
+    path: "/__pycache__"
+    shouldExist: false

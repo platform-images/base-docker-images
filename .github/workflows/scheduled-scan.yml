@@ -1,0 +1,252 @@
+name: Scheduled CVE Scan
+
+# Nightly scan of all published images in GHCR. Opens a GitHub Issue if new
+# CVEs are found above the severity threshold. An emergency rebuild can be
+# triggered by pushing a Renovate digest-bump PR or running `make build`.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC every night
+  workflow_dispatch:
+    inputs:
+      severity:
+        description: Minimum severity to alert on
+        required: false
+        default: CRITICAL,HIGH,MEDIUM
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+  issues: write
+
+env:
+  REGISTRY: ghcr.io
+  ORG: platform-images
+  SEVERITY: ${{ inputs.severity || 'CRITICAL,HIGH,MEDIUM' }}
+
+jobs:
+  scan:
+    name: CVE Scan / ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - wolfi-base
+          - nodejs-base
+          - python-base
+          - openjdk-base
+          - nginx-base
+          - go-base
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Standard ─────────────────────────────────────────────────────────────
+      - name: Pull standard image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest
+          docker pull ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest-distroless 2>/dev/null || true
+
+      - name: Trivy scan — standard (JSON output)
+        id: trivy-standard
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest
+          format: json
+          output: trivy-standard.json
+          severity: ${{ env.SEVERITY }}
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Parse standard scan results
+        id: parse-standard
+        if: steps.trivy-standard.outcome == 'failure'
+        run: |
+          # Count by severity
+          CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-standard.json)
+          HIGH=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' trivy-standard.json)
+          MEDIUM=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' trivy-standard.json)
+          echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "high=$HIGH"         >> "$GITHUB_OUTPUT"
+          echo "medium=$MEDIUM"     >> "$GITHUB_OUTPUT"
+
+          # Derive overall severity label
+          if   [[ "$CRITICAL" -gt 0 ]]; then echo "label=critical" >> "$GITHUB_OUTPUT"
+          elif [[ "$HIGH"     -gt 0 ]]; then echo "label=high"     >> "$GITHUB_OUTPUT"
+          else                               echo "label=medium"   >> "$GITHUB_OUTPUT"
+          fi
+
+          # Build markdown table (cap at 30 rows to keep issue readable)
+          TABLE=$(jq -r '
+            .Results[]?.Vulnerabilities[]? |
+            "| \(.VulnerabilityID) | \(.Severity) | \(.CVSS.nvd.V3Score // "N/A") | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "—") |"
+          ' trivy-standard.json | sort -t'|' -k3 -rV | head -30)
+          {
+            echo 'table<<EOF'
+            echo "$TABLE"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          # Raw JSON for the artifact
+          cp trivy-standard.json trivy-${{ matrix.image }}-standard.json
+
+      - name: Open issue — standard CVEs
+        if: steps.trivy-standard.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const image   = '${{ matrix.image }}';
+            const ref      = '${{ env.REGISTRY }}/${{ env.ORG }}/' + image + ':latest';
+            const critical = '${{ steps.parse-standard.outputs.critical }}';
+            const high     = '${{ steps.parse-standard.outputs.high }}';
+            const medium   = '${{ steps.parse-standard.outputs.medium }}';
+            const label    = '${{ steps.parse-standard.outputs.label }}';
+            const table    = `${{ steps.parse-standard.outputs.table }}`;
+
+            const body = [
+              `## CVE Alert — \`${ref}\``,
+              '',
+              `> **Scan date:** ${new Date().toISOString().slice(0, 10)}  `,
+              `> **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              '',
+              `**Severity breakdown:** ${critical} Critical · ${high} High · ${medium} Medium`,
+              '',
+              '### Detected CVEs (top 30)',
+              '',
+              '| CVE ID | Severity | CVSS | Package | Installed | Fixed In |',
+              '|--------|----------|------|---------|-----------|---------|',
+              table,
+              '',
+              '### Remediation steps',
+              '1. Trigger a Renovate digest-bump PR to pull the latest patched Wolfi packages, or',
+              '2. Run the emergency rebuild manually:',
+              '   ```bash',
+              `   make build IMAGE=${image}`,
+              `   make scan  IMAGE=${image}`,
+              '   ```',
+              '3. Merge the resulting PR — the release workflow will re-sign and re-attest.',
+            ].join('\n');
+
+            // Check for an existing open issue for this image to avoid duplicates
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['cve', image],
+              state: 'open',
+            });
+
+            if (existing.data.length > 0) {
+              // Update the existing issue with fresh scan data
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+                title: `[${label.toUpperCase()}] CVEs detected in ${image}:latest (updated ${new Date().toISOString().slice(0,10)})`,
+              });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                labels: [label],
+              });
+              console.log(`Updated existing issue #${existing.data[0].number}`);
+            } else {
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[${label.toUpperCase()}] CVEs detected in ${image}:latest`,
+                body,
+                labels: ['cve', label, image, 'automated'],
+              });
+              console.log(`Opened issue #${issue.number}`);
+            }
+
+      # ── Distroless ────────────────────────────────────────────────────────────
+      - name: Trivy scan — distroless (JSON output)
+        id: trivy-distroless
+        continue-on-error: true
+        run: |
+          # Skip gracefully if the distroless tag doesn't exist for this image
+          if ! docker inspect ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest-distroless \
+               > /dev/null 2>&1; then
+            echo "No distroless variant for ${{ matrix.image }} — skipping."
+            exit 0
+          fi
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$(pwd):/output" \
+            aquasec/trivy:latest image \
+            --exit-code 1 \
+            --severity "${{ env.SEVERITY }}" \
+            --ignore-unfixed \
+            --format json \
+            --output /output/trivy-distroless.json \
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest-distroless
+
+      # Upload all Trivy JSON reports as workflow artifacts for audit evidence
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.image }}-${{ github.run_number }}
+          path: trivy-*.json
+          retention-days: 30
+
+  # Auto-close CVE issues when a clean scan is detected
+  close-resolved-issues:
+    name: Close Resolved CVE Issues
+    runs-on: ubuntu-latest
+    needs: scan
+    if: always()
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const images = [
+              'wolfi-base','nodejs-base','python-base',
+              'openjdk-base','nginx-base','go-base'
+            ];
+            // For each image, check if all matrix scan jobs succeeded (no CVEs)
+            // and close any open CVE issues
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const scanJobs = jobs.data.jobs.filter(j =>
+              j.name.startsWith('CVE Scan /') && j.conclusion === 'success'
+            );
+            for (const job of scanJobs) {
+              const imageName = job.name.replace('CVE Scan / ', '');
+              const open = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['cve', imageName],
+                state: 'open',
+              });
+              for (const issue of open.data) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `Scan on ${new Date().toISOString().slice(0,10)} returned no CVEs above threshold. Closing automatically. 🎉`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+              }
+            }

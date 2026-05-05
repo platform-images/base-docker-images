@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "schedule": ["before 6am on Monday"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate — Base Image Digest Bumps",
+  "commitMessagePrefix": "chore(deps): ",
+  "labels": ["renovate", "digest-bump"],
+  "docker": {
+    "enabled": true,
+    "pinDigests": true
+  },
+  "packageRules": [
+    {
+      "description": "Chainguard/Wolfi digest bumps — auto-merge only when all status checks pass",
+      "matchDatasources": ["docker"],
+      "matchPackagePatterns": ["^cgr\\.dev/chainguard/"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "platformAutomerge": false,
+      "requiredStatusChecks": [
+        "secrets-scan",
+        "policy-check",
+        "build-and-scan",
+        "structure-tests"
+      ],
+      "commitMessageTopic": "Wolfi base digest for {{depName}}"
+    },
+    {
+      "description": "All other Docker image updates — require manual review",
+      "matchDatasources": ["docker"],
+      "matchPackagePatterns": [".*"],
+      "excludePackagePatterns": ["^cgr\\.dev/chainguard/"],
+      "automerge": false
+    }
+  ]
+}

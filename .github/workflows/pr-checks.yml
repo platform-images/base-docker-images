@@ -1,0 +1,222 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  ORG: platform-images
+
+# ── Job 1: Secrets scan ────────────────────────────────────────────────────────
+jobs:
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS — scan PR delta for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified
+
+# ── Job 2: OPA/Conftest policy check ──────────────────────────────────────────
+  policy-check:
+    name: Policy Check (OPA/Conftest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install conftest
+        run: |
+          CONFTEST_VERSION=0.50.0
+          curl -sSLo conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf conftest.tar.gz conftest
+          sudo install -m 755 conftest /usr/local/bin/conftest
+
+      - name: Conftest — lint all Dockerfiles against policies/dockerfile.rego
+        run: |
+          find images -name "Dockerfile*" ! -name "*.md" -print0 | \
+            xargs -0 conftest test --policy policies/dockerfile.rego --no-color
+
+# ── Job 3: Detect which image directories changed ─────────────────────────────
+  detect-changes:
+    name: Detect Changed Images
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            wolfi-base:
+              - 'images/wolfi-base/**'
+            nodejs-base:
+              - 'images/nodejs-base/**'
+            python-base:
+              - 'images/python-base/**'
+            openjdk-base:
+              - 'images/openjdk-base/**'
+            nginx-base:
+              - 'images/nginx-base/**'
+            go-base:
+              - 'images/go-base/**'
+
+# ── Job 4: Build, scan, lint, and test every changed image ────────────────────
+  build-and-scan:
+    name: Build & Scan / ${{ matrix.image }}
+    needs: [secrets-scan, policy-check, detect-changes]
+    if: needs.detect-changes.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.detect-changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Standard variant ────────────────────────────────────────────────────
+
+      - name: Build standard image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:pr
+          build-args: |
+            BUILD_DATE=${{ github.event.pull_request.updated_at }}
+            GIT_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Trivy CVE scan — standard
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ matrix.image }}:pr
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Dockle CIS Benchmark lint — standard
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            goodwithtech/dockle:latest \
+            --exit-code 1 --exit-level warn \
+            ${{ matrix.image }}:pr
+
+      - name: Install container-structure-test
+        run: |
+          curl -sSLo cst \
+            https://storage.googleapis.com/container-structure-test/latest/container-structure-test-linux-amd64
+          chmod +x cst && sudo mv cst /usr/local/bin/container-structure-test
+
+      - name: Container structure tests — standard
+        run: |
+          container-structure-test test \
+            --image ${{ matrix.image }}:pr \
+            --config images/${{ matrix.image }}/tests/structure-test.yaml
+
+      - name: Install goss + dgoss
+        run: |
+          GOSS_VER=$(curl -sSf https://api.github.com/repos/goss-org/goss/releases/latest | jq -r .tag_name)
+          curl -sSLo goss \
+            "https://github.com/goss-org/goss/releases/download/${GOSS_VER}/goss-linux-amd64"
+          chmod +x goss && sudo mv goss /usr/local/bin/goss
+          curl -sSLo dgoss \
+            "https://raw.githubusercontent.com/goss-org/goss/master/extras/dgoss/dgoss"
+          chmod +x dgoss && sudo mv dgoss /usr/local/bin/dgoss
+
+      - name: Goss runtime tests — standard
+        run: |
+          GOSS_FILES_PATH=images/${{ matrix.image }}/tests \
+          GOSS_PATH=/usr/local/bin/goss \
+            dgoss run ${{ matrix.image }}:pr
+
+      # ── Distroless variant (skip if no Dockerfile.distroless) ───────────────
+
+      - name: Build distroless image (no push)
+        if: hashFiles(format('images/{0}/Dockerfile.distroless', matrix.image)) != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile.distroless
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:pr-distroless
+          build-args: |
+            BUILD_DATE=${{ github.event.pull_request.updated_at }}
+            GIT_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}-distroless
+          cache-to: type=gha,scope=${{ matrix.image }}-distroless,mode=max
+
+      - name: Trivy CVE scan — distroless
+        if: hashFiles(format('images/{0}/Dockerfile.distroless', matrix.image)) != ''
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ matrix.image }}:pr-distroless
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Container structure tests — distroless
+        if: hashFiles(format('images/{0}/tests/structure-test-distroless.yaml', matrix.image)) != ''
+        run: |
+          container-structure-test test \
+            --image ${{ matrix.image }}:pr-distroless \
+            --config images/${{ matrix.image }}/tests/structure-test-distroless.yaml
+
+# ── Summary gate — the single required status check configured in branch protection ──
+  pr-check-summary:
+    name: PR Check Summary
+    runs-on: ubuntu-latest
+    needs: [secrets-scan, policy-check, build-and-scan]
+    if: always()
+    steps:
+      - name: Evaluate results
+        run: |
+          SECRETS="${{ needs.secrets-scan.result }}"
+          POLICY="${{ needs.policy-check.result }}"
+          BUILD="${{ needs.build-and-scan.result }}"
+
+          echo "secrets-scan:  $SECRETS"
+          echo "policy-check:  $POLICY"
+          echo "build-and-scan: $BUILD"
+
+          # build-and-scan is 'skipped' when no image files changed — that is allowed
+          if [[ "$SECRETS" != "success" || "$POLICY" != "success" ]]; then
+            echo "::error::Required checks did not pass."
+            exit 1
+          fi
+          if [[ "$BUILD" != "success" && "$BUILD" != "skipped" ]]; then
+            echo "::error::build-and-scan failed."
+            exit 1
+          fi
+          echo "All required checks passed."

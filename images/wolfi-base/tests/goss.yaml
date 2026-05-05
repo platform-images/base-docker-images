@@ -1,0 +1,17 @@
+user:
+  nonroot:
+    exists: true
+    uid: 65532
+    gid: 65532
+
+file:
+  /etc/ssl/certs/ca-certificates.crt:
+    exists: true
+    mode: "0644"
+  /usr/share/zoneinfo:
+    exists: true
+    filetype: directory
+  /etc/passwd:
+    exists: true
+    contains:
+      - "nonroot"

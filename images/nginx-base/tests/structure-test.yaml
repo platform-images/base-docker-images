@@ -1,0 +1,47 @@
+schemaVersion: 2.0.0
+
+metadataTests:
+  user: "101:101"
+  labels:
+    - key: "org.opencontainers.image.source"
+      value: "https://github.com/platform-images/base-docker-images"
+    - key: "org.opencontainers.image.licenses"
+      value: "Apache-2.0"
+
+commandTests:
+  - name: "nginx binary executes"
+    command: "nginx"
+    args: ["-v"]
+    expectedError: ["nginx version:"]
+  - name: "nginx config is valid"
+    command: "nginx"
+    args: ["-t", "-c", "/etc/nginx/nginx.conf"]
+    expectedError: ["syntax is ok", "test is successful"]
+
+fileExistenceTests:
+  - name: "nginx binary present"
+    path: "/usr/sbin/nginx"
+    shouldExist: true
+  - name: "custom nginx.conf present"
+    path: "/etc/nginx/nginx.conf"
+    shouldExist: true
+  - name: "mime.types present"
+    path: "/etc/nginx/mime.types"
+    shouldExist: true
+  - name: "no default HTML index shipped"
+    path: "/var/www/html/index.html"
+    shouldExist: false
+
+fileContentTests:
+  - name: "server_tokens off is set"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents: ["server_tokens off"]
+  - name: "X-Frame-Options header present"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents: ["X-Frame-Options"]
+  - name: "Strict-Transport-Security header present"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents: ["Strict-Transport-Security"]
+  - name: "listens on non-privileged port 8080"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents: ["listen 8080"]

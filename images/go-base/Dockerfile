@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# Go toolchain on Wolfi — standard variant (full Go toolchain, includes shell).
+# Use as the build stage in multi-stage Dockerfiles; pair with Dockerfile.distroless for runtime.
+FROM cgr.dev/chainguard/go:latest-dev@sha256:b782cb183c5b592ab2d2ace098629244c2d5a527c6812c35ed9f5c355ed2f84d
+
+ARG BUILD_DATE
+ARG GIT_REVISION
+
+LABEL org.opencontainers.image.source="https://github.com/platform-images/base-docker-images"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# CGO_ENABLED=0 produces a fully static binary with no libc dependency
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOPATH=/go \
+    GOPROXY=https://proxy.golang.org,direct
+
+WORKDIR /app
+
+USER nonroot
