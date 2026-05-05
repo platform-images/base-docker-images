@@ -40,10 +40,10 @@ jobs:
           - nginx-base
           - go-base
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -58,7 +58,7 @@ jobs:
       - name: Trivy scan — standard (JSON output)
         id: trivy-standard
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.image }}:latest
           format: json
@@ -101,7 +101,7 @@ jobs:
 
       - name: Open issue — standard CVEs
         if: steps.trivy-standard.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             const image   = '${{ matrix.image }}';
@@ -196,7 +196,7 @@ jobs:
       # Upload all Trivy JSON reports as workflow artifacts for audit evidence
       - name: Upload scan artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: trivy-${{ matrix.image }}-${{ github.run_number }}
           path: trivy-*.json
@@ -209,7 +209,7 @@ jobs:
     needs: scan
     if: always()
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9.0.0
         with:
           script: |
             const images = [
