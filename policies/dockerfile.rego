@@ -1,7 +1,6 @@
 package dockerfile
 
-import future.keywords.if
-import future.keywords.in
+import future.keywords
 
 # ── Required OCI labels ────────────────────────────────────────────────────────
 
