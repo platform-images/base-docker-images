@@ -293,6 +293,17 @@ jobs:
             dockle-report-${{ matrix.image }}.json
             sbom-standard.spdx.json
 
+      # ── Trigger Renovate in consuming repos ──────────────────────────────────
+      - name: Dispatch Renovate run in app-reference-implementations
+        if: success()
+        run: |
+          gh api repos/platform-images/app-reference-implementations/dispatches \
+            --method POST \
+            --field event_type=renovate-run \
+            --field client_payload='{"image":"${{ matrix.image }}","digest":"${{ steps.build-standard.outputs.digest }}"}'
+        env:
+          GH_TOKEN: ${{ secrets.PLATFORM_TOKEN }}
+
       # ── Slack/Teams notification ──────────────────────────────────────────────
       - name: Notify Slack
         if: success() && env.SLACK_WEBHOOK_URL != ''
